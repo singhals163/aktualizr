@@ -1,0 +1,55 @@
+#ifndef RAUC_H_
+#define RAUC_H_
+
+#include <sdbus-c++/sdbus-c++.h>
+#include <string>
+#include <atomic>
+#include "packagemanagerinterface.h"
+#include "json/json.h"  
+
+class RaucManager : public PackageManagerInterface {
+ public:
+  // Constructor, using PackageManagerInterface's constructor
+  RaucManager(PackageConfig pconfig, const BootloaderConfig& bconfig,
+              std::shared_ptr<INvStorage> storage, std::shared_ptr<HttpInterface> http);
+
+  // Destructor
+  ~RaucManager() override = default;
+
+  RaucManager(const RaucManager &) = delete;
+  RaucManager(RaucManager &&) = delete;
+  RaucManager &operator=(const RaucManager &) = delete;
+  RaucManager &operator=(RaucManager &&) = delete;
+
+  // Overriding necessary functions from PackageManagerInterface
+  std::string name() const override { return "ostree"; };
+  Json::Value getInstalledPackages() const override;
+  Uptane::Target getCurrent() const override;
+  data::InstallationResult install(const Uptane::Target& target) override;
+  data::InstallationResult finalizeInstall(const Uptane::Target& target) override;
+  bool fetchTarget(const Uptane::Target& target, Uptane::Fetcher& fetcher, const KeyManager& keys,
+                   const FetcherProgressCb& progress_cb, const api::FlowControlToken* token) override;
+  TargetStatus verifyTarget(const Uptane::Target& target) const override;
+  bool checkAvailableDiskSpace(uint64_t required_bytes) const override;
+  std::ofstream createTargetFile(const Uptane::Target& target) override;
+  std::ofstream appendTargetFile(const Uptane::Target& target) override;
+  std::ifstream openTargetFile(const Uptane::Target& target) const override;
+  void removeTargetFile(const Uptane::Target& target) override;
+
+ private:
+  void RaucManager::handleRaucResponse(data::ResultCode resultCode);
+  // Signal handlers for installation progress and completion
+  void onCompleted(const std::int32_t& status);
+  void onProgressChanged(const std::string& interfaceName,
+                         const std::map<std::string, sdbus::Variant>& changedProps,
+                         std::vector<std::string> invalidProperties);
+
+  // Method to send the installation request to RAUC via D-Bus
+  void sendRaucInstallRequest(const std::string& bundlePath) const;
+  // RAUC-related configurations and proxy object for DBus communication
+  data::ResultCode installResult;
+  std::string installResultDes;
+  std::shared_ptr<sdbus::IProxy> raucProxy_;
+};
+
+#endif  // RAUC_H_
