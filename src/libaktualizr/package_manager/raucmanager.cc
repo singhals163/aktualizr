@@ -104,27 +104,83 @@ Uptane::Target RaucManager::getCurrent() const {
   return currentTarget;
 }
 
+
+// Function to create the /run/aktualizr directory if it does not exist
+void createDirectoryIfNotExists(const std::string& directoryPath)
+{
+    struct stat st;
+    if (stat(directoryPath.c_str(), &st) != 0) {
+        // Directory does not exist, create it
+        if (mkdir(directoryPath.c_str(), 0755) != 0) {
+            throw std::runtime_error("Failed to create directory: " + directoryPath);
+        }
+    } else if (!S_ISDIR(st.st_mode)) {
+        throw std::runtime_error(directoryPath + " exists but is not a directory");
+    }
+}
+
+// Function to write the SHA256 hash to /run/aktualizr/expected-digest
+void writeHashToFile(const std::string& hash)
+{
+    const std::string directoryPath = "/run/aktualizr";
+    const std::string filePath = directoryPath + "/expected-digest";
+
+    // Create the directory if it doesn't exist
+    createDirectoryIfNotExists(directoryPath);
+
+    // Open the file in write mode (with truncation) and proper permissions
+    std::ofstream file(filePath);
+    if (!file.is_open()) {
+        throw std::runtime_error("Failed to open file: " + filePath);
+    }
+
+    // Write the hash to the file
+    file << hash;
+
+    if (!file) {
+        throw std::runtime_error("Failed to write to file: " + filePath);
+    }
+
+    // Explicitly close the file
+    file.close();
+
+    std::cout << "SHA256 hash written and file closed: " << filePath << std::endl;
+}
+
+
+
 // Install a target using RAUC
 data::InstallationResult RaucManager::install(const Uptane::Target& target) {
-  // Extract bundle URI from the target object
-  std::string bundlePath = target.uri;
+    // Extract bundle URI from the target object
+    std::string bundlePath = target.uri();
+    
+    // Extract SHA256 hash from the target object
+    std::string sha256Hash = target.custom()["rauc"]["rawHashes"]["sha256"].asString();  // Assuming Uptane::Target has this structure
 
-  // Send RAUC installation request
-  try {
-    sendRaucInstallRequest(bundlePath);
-    std::cout << "Installation request sent for bundle: " << bundlePath << std::endl;
-  } catch (const std::runtime_error& e) {
-    std::cerr << e.what() << std::endl;
-    this->handleRaucResponse(data::ResultCode::Numeric::kGeneralError);
-  }
-  // Monitor RAUC signals for the result
+    // Write the SHA256 hash to the expected file
+    try {
+        writeHashToFile(sha256Hash);
+    } catch (const std::exception& e) {
+        std::cerr << "Error writing hash to file: " << e.what() << std::endl;
+        return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to write SHA256 hash to file");
+    }
 
-  // Wait for the 'Completed' signal
+    // Send RAUC installation request
+    try {
+        sendRaucInstallRequest(bundlePath);
+        std::cout << "Installation request sent for bundle: " << bundlePath << std::endl;
+    } catch (const std::runtime_error& e) {
+        std::cerr << e.what() << std::endl;
+        return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to send RAUC installation request");
+    }
+
+    // Monitor RAUC signals for the result
+    // Wait for the 'Completed' signal
     while (!installationComplete.load()) {
         sleep(1);
     }
 
-  return data::InstallationResult(this->installResult, this->installResultDes);  // The actual result will come from the signal handlers
+    return data::InstallationResult(this->installResult, this->installResultDes);  // The actual result will come from the signal handlers
 }
 
 // Finalize the installation
