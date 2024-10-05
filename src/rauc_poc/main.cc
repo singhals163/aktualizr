@@ -94,10 +94,9 @@ void createDirectoryIfNotExists(const std::string& directoryPath)
 }
 
 // Function to write the SHA256 hash to /run/aktualizr/expected-digest
-void writeHashToFile(const std::string& hash)
+void writeHashToFile(const std::string& hash, const std::string directoryPath, const std::string file)
 {
-    const std::string directoryPath = "/run/aktualizr";
-    const std::string filePath = directoryPath + "/expected-digest";
+    const std::string filePath = directoryPath + file;
 
     // Create the directory if it doesn't exist
     createDirectoryIfNotExists(directoryPath);
@@ -141,10 +140,12 @@ int main(int argc, char **argv)
     // Extract 'uri' and 'rauc.rawHashes.sha256'
     std::string uri = jsonObject["custom"]["uri"].asString();
     std::string sha256Hash = jsonObject["custom"]["rauc"]["rawHashes"]["sha256"].asString();
+    std::string rootHash = jsonObject["hashes"]["sha256"].asString();
 
     // Write the SHA256 hash to the expected file
     try {
-        writeHashToFile(sha256Hash);
+        writeHashToFile(sha256Hash, "/run/aktualizr", "/expected-digest");
+        writeHashToFile(rootHash, "/run/aktualizr", "/root-hash");
     } catch (const std::exception& e) {
         std::cerr << "Error writing hash to file: " << e.what() << std::endl;
         return 1;
