@@ -102,11 +102,26 @@ void RaucManager::sendRaucInstallRequest(const std::string& bundlePath) const {
   }
 }
 
-// Get installed packages (stub implementation, as RAUC does not track package metadata directly)
 Json::Value RaucManager::getInstalledPackages() const {
-  Json::Value result;
-  // Implement logic for retrieving installed packages if applicable
-  return result;
+  std::string packages_str = Utils::readFile(config.packages_file);
+  std::vector<std::string> package_lines;
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+  boost::split(package_lines, packages_str, boost::is_any_of("\n"));
+  Json::Value packages(Json::arrayValue);
+  for (auto it = package_lines.begin(); it != package_lines.end(); ++it) {
+    if (it->empty()) {
+      continue;
+    }
+    size_t pos = it->find(" ");
+    if (pos == std::string::npos) {
+      throw std::runtime_error("Wrong packages file format");
+    }
+    Json::Value package;
+    package["name"] = it->substr(0, pos);
+    package["version"] = it->substr(pos + 1);
+    packages.append(package);
+  }
+  return packages;
 }
 
 // Get the current target (stub implementation)
