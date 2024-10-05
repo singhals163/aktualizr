@@ -94,9 +94,9 @@ void createDirectoryIfNotExists(const std::string& directoryPath)
 }
 
 // Function to write the SHA256 hash to /run/aktualizr/expected-digest
-void writeHashToFile(const std::string& hash, const std::string directoryPath, const std::string file)
+void writeHashToFile(const std::string& hash, const std::string directoryPath, const std::string fileName)
 {
-    const std::string filePath = directoryPath + file;
+    const std::string filePath = directoryPath + fileName;
 
     // Create the directory if it doesn't exist
     createDirectoryIfNotExists(directoryPath);
