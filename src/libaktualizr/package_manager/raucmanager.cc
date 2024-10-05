@@ -8,11 +8,13 @@
 /*
 TODO:
 1. If post-install-handler script fails, it returns an error.
-2. print the expected root hash on some file. 
+2. print the expected root hash on some file. (done)
 3. We should handle the exception and change the bootloder config in the post-install-handler script itself. (Difficult to manage the bootloader from the aktualizr) 
-4. Implement the post-install-handler
+    - Not possible because we can't send another request to rauc while the previous one is not served, therefore can't call `rauc status mark-bad` from post-install-handler
+    - **solution, call rauc status mark-active from aktualizr in case of error** (done)
+4. Implement the post-install-handler (done)
 5. Handle the error separately saying no reboot is required in this case. 
-6.
+6. 
 
 */
 
@@ -52,10 +54,28 @@ void RaucManager::handleRaucResponse(data::ResultCode resultCode) {
       installResultDes = "Installation Completed Successfully, restart required";
     }
     else if (installResult == data::ResultCode::Numeric::kInstallFailed) {
+      // make rauc status mark-active call
       while(!installationErrorLogged) {
         sleep(1);
       }
       installResultDes = installationError;
+      try {
+            std::string state = "active";
+            std::string slot_identifier = "booted";  // Could also be "other" or a specific slot identifier
+            std::string slot_name;  // This will be filled by the call (output)
+            std::string message;  // This will be filled by the call (output)
+
+            // Call the `Mark` method
+            raucProxy_->callMethod("Mark").onInterface("de.pengutronix.rauc.Installer")
+                .withArguments(state, slot_identifier)
+                .storeResultsTo(slot_name, message);  // Capture the output parameters
+            
+            std::cout << "Mark-active call successful: " << message << std::endl;
+            std::cout << "Activated slot: " << slot_name << std::endl;
+            
+        } catch (const std::exception& e) {
+            std::cerr << "Error calling RAUC Mark method: " << e.what() << std::endl;
+        }
     }
     installationComplete.store(true);
     return;
