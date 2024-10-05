@@ -5,6 +5,19 @@
 
 
 
+/*
+TODO:
+1. If post-install-handler script fails, it returns an error.
+2. print the expected root hash on some file. 
+3. We should handle the exception and change the bootloder config in the post-install-handler script itself. (Difficult to manage the bootloader from the aktualizr) 
+4. Implement the post-install-handler
+5. Handle the error separately saying no reboot is required in this case. 
+6.
+
+*/
+
+
+
 // Constructor: Initializes RAUC proxy and registers signal handlers
 RaucManager::RaucManager(PackageConfig pconfig, const BootloaderConfig& bconfig, std::shared_ptr<INvStorage> storage,
                          std::shared_ptr<HttpInterface> http)
