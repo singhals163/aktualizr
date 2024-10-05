@@ -22,7 +22,7 @@ class RaucManager : public PackageManagerInterface {
   RaucManager &operator=(RaucManager &&) = delete;
 
   // Overriding necessary functions from PackageManagerInterface
-  std::string name() const override { return "ostree"; };
+  std::string name() const override { return "rauc"; };
   Json::Value getInstalledPackages() const override;
   Uptane::Target getCurrent() const override;
   data::InstallationResult install(const Uptane::Target& target) override;
@@ -30,11 +30,6 @@ class RaucManager : public PackageManagerInterface {
   bool fetchTarget(const Uptane::Target& target, Uptane::Fetcher& fetcher, const KeyManager& keys,
                    const FetcherProgressCb& progress_cb, const api::FlowControlToken* token) override;
   TargetStatus verifyTarget(const Uptane::Target& target) const override;
-  bool checkAvailableDiskSpace(uint64_t required_bytes) const override;
-  std::ofstream createTargetFile(const Uptane::Target& target) override;
-  std::ofstream appendTargetFile(const Uptane::Target& target) override;
-  std::ifstream openTargetFile(const Uptane::Target& target) const override;
-  void removeTargetFile(const Uptane::Target& target) override;
 
  private:
   void RaucManager::handleRaucResponse(data::ResultCode resultCode);
@@ -49,6 +44,10 @@ class RaucManager : public PackageManagerInterface {
   // RAUC-related configurations and proxy object for DBus communication
   data::ResultCode installResult;
   std::string installResultDes;
+  std::string installationError;
+  // Atomic flag to indicate whether the installation is complete
+  std::atomic<bool> installationComplete;
+  std::atomic<bool> installationErrorLogged;
   std::shared_ptr<sdbus::IProxy> raucProxy_;
 };
 

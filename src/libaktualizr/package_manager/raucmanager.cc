@@ -3,8 +3,7 @@
 #include <iostream>
 #include <stdexcept>
 
-// Atomic flag to indicate whether the installation is complete
-std::atomic<bool> installationComplete(false);
+
 
 // Constructor: Initializes RAUC proxy and registers signal handlers
 RaucManager::RaucManager(PackageConfig pconfig, const BootloaderConfig& bconfig, std::shared_ptr<INvStorage> storage,
@@ -35,7 +34,16 @@ RaucManager::RaucManager(PackageConfig pconfig, const BootloaderConfig& bconfig,
 }
 
 void RaucManager::handleRaucResponse(data::ResultCode resultCode) {
-    this->installResult = resultCode;
+    installResult = resultCode;
+    if(installResult == data::ResultCode::Numeric::kNeedCompletion) {
+      installResultDes = "Installation Completed Successfully, restart required";
+    }
+    else if (installResult == data::ResultCode::Numeric::kInstallFailed) {
+      while(!installationErrorLogged) {
+        sleep(1);
+      }
+      installResultDes = installationError;
+    }
     installationComplete.store(true);
     return;
 }
@@ -44,10 +52,10 @@ void RaucManager::handleRaucResponse(data::ResultCode resultCode) {
 void RaucManager::onCompleted(const std::int32_t& status) {
   if (status == 0) {
     std::cout << "Installation completed successfully with status code: " << status << std::endl;
-    this->handleRaucResponse(data::ResultCode::Numeric::kNeedCompletion);
+    handleRaucResponse(data::ResultCode::Numeric::kNeedCompletion);
   } else {
     std::cout << "Installation did not complete successfully with status code: " << status << std::endl;
-    this->handleRaucResponse(data::ResultCode::Numeric::kInstallFailed);
+    handleRaucResponse(data::ResultCode::Numeric::kInstallFailed);
   }
   return;
 }
@@ -73,7 +81,9 @@ void RaucManager::onProgressChanged(const std::string& interfaceName,
     auto itError = changedProperties.find("LastError");
     if (itError != changedProperties.end()) {
       std::string lastError = itError->second.get<std::string>();
-      std::cout << "Last Error: " << lastError << std::endl;
+      std::cerr << "Last Error: " << lastError << std::endl;
+      installationError = lastError;
+      installationErrorLogged.store(true);
     }
   }
 }
@@ -84,6 +94,8 @@ void RaucManager::sendRaucInstallRequest(const std::string& bundlePath) const {
   method << bundlePath;
 
   try {
+    installationComplete.store(false);
+    installationErrorLogged.store(false);
     this->raucProxy_->callMethod(method);
   } catch (const sdbus::Error& e) {
     throw std::runtime_error("Failed to send RAUC install request: " + e.getMessage());
@@ -103,7 +115,6 @@ Uptane::Target RaucManager::getCurrent() const {
   // Implement logic for retrieving current target
   return currentTarget;
 }
-
 
 // Function to create the /run/aktualizr directory if it does not exist
 void createDirectoryIfNotExists(const std::string& directoryPath)
@@ -148,14 +159,20 @@ void writeHashToFile(const std::string& hash)
 }
 
 
-
+// TODO: implement error handling
 // Install a target using RAUC
 data::InstallationResult RaucManager::install(const Uptane::Target& target) {
     // Extract bundle URI from the target object
     std::string bundlePath = target.uri();
+    if(!bundlePath) {
+      return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to get the bundle path from target");
+    }
     
     // Extract SHA256 hash from the target object
     std::string sha256Hash = target.custom()["rauc"]["rawHashes"]["sha256"].asString();  // Assuming Uptane::Target has this structure
+    if(!sha256Hash) {
+      return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to get the root sha256 hash from target");
+    }
 
     // Write the SHA256 hash to the expected file
     try {
@@ -206,41 +223,6 @@ TargetStatus RaucManager::verifyTarget(const Uptane::Target& target) const {
 bool RaucManager::checkAvailableDiskSpace(uint64_t required_bytes) const {
   // Implement logic to check disk space
   return true;
-}
-
-// Create a new target file
-std::ofstream RaucManager::createTargetFile(const Uptane::Target& target) {
-  // Logic to create a new file for writing the target
-  std::ofstream file(target.filename, std::ios::out | std::ios::trunc);
-  if (!file.is_open()) {
-    throw std::runtime_error("Failed to create target file: " + target.filename);
-  }
-  return file;
-}
-
-// Append to an existing target file
-std::ofstream RaucManager::appendTargetFile(const Uptane::Target& target) {
-  std::ofstream file(target.filename, std::ios::out | std::ios::app);
-  if (!file.is_open()) {
-    throw std::runtime_error("Failed to append to target file: " + target.filename);
-  }
-  return file;
-}
-
-// Open an existing target file
-std::ifstream RaucManager::openTargetFile(const Uptane::Target& target) const {
-  std::ifstream file(target.filename, std::ios::in);
-  if (!file.is_open()) {
-    throw std::runtime_error("Failed to open target file: " + target.filename);
-  }
-  return file;
-}
-
-// Remove the target file
-void RaucManager::removeTargetFile(const Uptane::Target& target) {
-  if (remove(target.filename.c_str()) != 0) {
-    throw std::runtime_error("Failed to remove target file: " + target.filename);
-  }
 }
 
 // Send a RAUC install request over DBus
