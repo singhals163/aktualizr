@@ -26,6 +26,7 @@ class RaucManager : public PackageManagerInterface {
   Json::Value getInstalledPackages() const override;
   Uptane::Target getCurrent() const override;
   data::InstallationResult install(const Uptane::Target& target) override;
+  void completeInstall() const override;
   data::InstallationResult finalizeInstall(const Uptane::Target& target) override;
   bool fetchTarget(const Uptane::Target& target, Uptane::Fetcher& fetcher, const KeyManager& keys,
                    const FetcherProgressCb& progress_cb, const api::FlowControlToken* token) override;

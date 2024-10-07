@@ -248,6 +248,11 @@ data::InstallationResult RaucManager::install(const Uptane::Target& target) {
     return data::InstallationResult(this->installResult, this->installResultDes);  // The actual result will come from the signal handlers
 }
 
+void OstreeManager::completeInstall() const {
+  // LOG_INFO << "About to reboot the system in order to apply pending updates...";
+  bootloader_->reboot();
+}
+
 // Finalize the installation
 data::InstallationResult RaucManager::finalizeInstall(const Uptane::Target& target) {
   // Finalization logic for RAUC installations (can be customized based on RAUC API)
