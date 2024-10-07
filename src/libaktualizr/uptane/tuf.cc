@@ -189,6 +189,18 @@ bool Target::IsOstree() const {
   }
 }
 
+bool Target::IsRauc() const {
+  // NOLINTNEXTLINE(bugprone-branch-clone)
+  if (type_ == "RAUC") {
+    // Modern servers explicitly specify the type of the target
+    return true;
+  } else {
+    // If type is explicitly not RAUC or the length is non-zero, then this
+    // is a firmware blob.
+    return false;
+  }
+}
+
 bool Target::MatchTarget(const Target &t2) const {
   // type_ (targetFormat) is only provided by the Image repo.
   // ecus_ is only provided by the Image repo.
