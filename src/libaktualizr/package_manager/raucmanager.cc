@@ -26,8 +26,8 @@ RaucManager::RaucManager(const PackageConfig &pconfig, const BootloaderConfig &b
                              Bootloader *bootloader)
     : PackageManagerInterface(pconfig, BootloaderConfig(), storage, http),
       bootloader_(bootloader == nullptr ? new Bootloader(bconfig, *storage) : bootloader) {
-  this->installResult = data::ResultCode::Numeric::kUnknown;
-  this->installResultDes = std::string("");
+  this->installResultCode = data::ResultCode::Numeric::kUnknown;
+  this->installResultDescription = std::string("");
   const char* serviceName = "de.pengutronix.rauc";
   const char* objectPath = "/";
 
@@ -87,7 +87,7 @@ data::InstallationResult RaucManager::install(const Uptane::Target& target) cons
     // Send RAUC installation request
     try {
         sendRaucInstallRequest(bundlePath);
-        std::cout << "Installation request sent for bundle: " << bundlePath << std::endl;
+        // std::cout << "Installation request sent for bundle: " << bundlePath << std::endl;
     } catch (const std::runtime_error& e) {
         std::cerr << e.what() << std::endl;
         return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to send RAUC installation request");
@@ -105,7 +105,7 @@ data::InstallationResult RaucManager::install(const Uptane::Target& target) cons
     }
 
     sync();
-    return data::InstallationResult(this->installResult, this->installResultDescription);  // The actual result will come from the signal handlers
+    return data::InstallationResult(this->installResultCode, this->installResultDescription);  // The actual result will come from the signal handlers
 }
 
 // Send a RAUC install request over DBus
@@ -133,7 +133,7 @@ void RaucManager::onCompleted(const std::int32_t& status) {
         sleep(1);
       }
       installResultCode = data::ResultCode::Numeric::kInstallFailed;
-      installResultDescription = installationError;
+      installResultDescription = installResultError;
       // handleRaucResponse(data::ResultCode::Numeric::kInstallFailed);
     }
     installationComplete.store(true);
@@ -151,18 +151,18 @@ void RaucManager::onProgressChanged(const std::string& interfaceName,
       auto percentage = progress.get<0>();
       auto message = progress.get<1>();
       auto depth = progress.get<2>();
-      std::cout << "|";
-      for (int i = 1; i < depth; i++) {
-        std::cout << "  |";
-      }
-      std::cout << "-\"" << message << "\" (" << percentage << "%)\n";
+      // std::cout << "|";
+      // for (int i = 1; i < depth; i++) {
+      //   std::cout << "  |";
+      // }
+      // std::cout << "-\"" << message << "\" (" << percentage << "%)\n";
     }
 
     auto itError = changedProperties.find("LastError");
     if (itError != changedProperties.end()) {
       std::string lastError = itError->second.get<std::string>();
       std::cerr << "Last Error: " << lastError << std::endl;
-      installationError = lastError;
+      installResultError = lastError;
       installationErrorLogged.store(true);
     }
   }
@@ -265,7 +265,7 @@ data::InstallationResult RaucManager::finalizeInstall(const Uptane::Target& targ
 }
 
 // Function to create the /run/aktualizr directory if it does not exist
-void createDirectoryIfNotExists(const std::string& directoryPath)
+void RaucManager::createDirectoryIfNotExists(const std::string& directoryPath) const
 {
     struct stat st;
     if (stat(directoryPath.c_str(), &st) != 0) {
@@ -279,7 +279,7 @@ void createDirectoryIfNotExists(const std::string& directoryPath)
 }
 
 // Function to write the SHA256 hash to /run/aktualizr/expected-digest
-void writeHashToFile(const std::string& hash)
+void RaucManager::writeHashToFile(const std::string& hash) const
 {
     const std::string directoryPath = "/run/aktualizr";
     const std::string filePath = directoryPath + "/expected-digest";
@@ -303,7 +303,8 @@ void writeHashToFile(const std::string& hash)
     // Explicitly close the file
     file.close();
 
-    std::cout << "SHA256 hash written and file closed: " << filePath << std::endl;
+    // std::cout << "SHA256 hash written and file closed: " << filePath << std::endl;
+    sync();
 }
 
 

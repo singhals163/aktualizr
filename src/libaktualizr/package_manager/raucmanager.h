@@ -51,15 +51,19 @@ class RaucManager : public PackageManagerInterface {
 
   // Method to send the installation request to RAUC via D-Bus
   void sendRaucInstallRequest(const std::string& bundlePath) const;
+
+  // Method to write the rootImage hash to desired file
+  void writeHashToFile(const std::string& hash) const;
+  void createDirectoryIfNotExists(const std::string& directoryPath) const;
   // RAUC-related configurations and proxy object for DBus communication
   data::ResultCode::Numeric installResultCode;
   std::string installResultDescription;
-  std::string installationResultError;
+  std::string installResultError;
+  std::shared_ptr<sdbus::IProxy> raucProxy_;
+  std::unique_ptr<Bootloader> bootloader_;
   // Atomic flag to indicate whether the installation is complete
   std::atomic<bool> installationComplete;
   std::atomic<bool> installationErrorLogged;
-  std::shared_ptr<sdbus::IProxy> raucProxy_;
-  std::unique_ptr<Bootloader> bootloader_;
 };
 
 #endif  // RAUC_H_
