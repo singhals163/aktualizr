@@ -21,10 +21,12 @@ TODO:
 
 
 // Constructor: Initializes RAUC proxy and registers signal handlers
-RaucManager::RaucManager(PackageConfig pconfig, const BootloaderConfig& bconfig, std::shared_ptr<INvStorage> storage,
-                         std::shared_ptr<HttpInterface> http)
-    : PackageManagerInterface(std::move(pconfig), bconfig, std::move(storage), std::move(http)) {
-  this->installResult = data::ResultCode::Numeric::kUnknown;
+RaucManager::RaucManager(const PackageConfig &pconfig, const BootloaderConfig &bconfig,
+                             const std::shared_ptr<INvStorage> &storage, const std::shared_ptr<HttpInterface> &http,
+                             Bootloader *bootloader)
+    : PackageManagerInterface(pconfig, BootloaderConfig(), storage, http),
+      bootloader_(bootloader == nullptr ? new Bootloader(bconfig, *storage) : bootloader) {
+  // this->installResult = data::ResultCode::Numeric::kUnknown;
   this->installResultDes = std::string("");
   const char* serviceName = "de.pengutronix.rauc";
   const char* objectPath = "/";
@@ -48,7 +50,7 @@ RaucManager::RaucManager(PackageConfig pconfig, const BootloaderConfig& bconfig,
   this->raucProxy_->finishRegistration();
 }
 
-void RaucManager::handleRaucResponse(data::ResultCode resultCode) {
+void RaucManager::handleRaucResponse(data::ResultCode::Numeric resultCode) {
     installResult = resultCode;
     if(installResult == data::ResultCode::Numeric::kNeedCompletion) {
       installResultDes = "Installation Completed Successfully, restart required";
@@ -127,8 +129,8 @@ void RaucManager::sendRaucInstallRequest(const std::string& bundlePath) const {
   method << bundlePath;
 
   try {
-    installationComplete.store(false);
-    installationErrorLogged.store(false);
+    // installationComplete.store(false);
+    // installationErrorLogged.store(false);
     this->raucProxy_->callMethod(method);
   } catch (const sdbus::Error& e) {
     throw std::runtime_error("Failed to send RAUC install request: " + e.getMessage());
@@ -248,7 +250,7 @@ void writeHashToFile(const std::string& hash)
 
 // TODO: implement error handling
 // Install a target using RAUC
-data::InstallationResult RaucManager::install(const Uptane::Target& target) {
+data::InstallationResult RaucManager::install(const Uptane::Target& target) const {
     // Extract bundle URI from the target object
     std::string bundlePath = target.uri();
     // if(bundlePath == std::string::empty) {
@@ -256,10 +258,10 @@ data::InstallationResult RaucManager::install(const Uptane::Target& target) {
     // }
     
     // Extract SHA256 hash from the target object
-    std::string sha256Hash = target.custom()["rauc"]["rawHashes"]["sha256"].asString();  // Assuming Uptane::Target has this structure
-    if(!sha256Hash) {
-      return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to get the root sha256 hash from target");
-    }
+    std::string sha256Hash = target.custom_data()["rauc"]["rawHashes"]["sha256"].asString();  // Assuming Uptane::Target has this structure
+    // if(sha256Hash == std::string::empty) {
+    //   return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to get the root sha256 hash from target");
+    // }
 
     // Write the SHA256 hash to the expected file
     try {
@@ -287,7 +289,7 @@ data::InstallationResult RaucManager::install(const Uptane::Target& target) {
     return data::InstallationResult(this->installResult, this->installResultDes);  // The actual result will come from the signal handlers
 }
 
-void OstreeManager::completeInstall() const {
+void RaucManager::completeInstall() const {
   // LOG_INFO << "About to reboot the system in order to apply pending updates...";
   bootloader_->reboot();
 }
