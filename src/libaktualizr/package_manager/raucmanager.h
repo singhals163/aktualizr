@@ -32,6 +32,7 @@ class RaucManager : public PackageManagerInterface {
   // Overriding necessary functions from PackageManagerInterface
   std::string name() const override { return "rauc"; };
   Json::Value getInstalledPackages() const override;
+  virtual std::string getCurrentHash() const;
   Uptane::Target getCurrent() const override;
   data::InstallationResult install(const Uptane::Target& target) const override;
   void completeInstall() const override;
@@ -41,7 +42,7 @@ class RaucManager : public PackageManagerInterface {
   TargetStatus verifyTarget(const Uptane::Target& target) const override;
 
  private:
-  void handleRaucResponse(data::ResultCode::Numeric resultCode);
+  // void handleRaucResponse(data::ResultCode::Numeric resultCode);
   // Signal handlers for installation progress and completion
   void onCompleted(const std::int32_t& status);
   void onProgressChanged(const std::string& interfaceName,
@@ -51,15 +52,13 @@ class RaucManager : public PackageManagerInterface {
   // Method to send the installation request to RAUC via D-Bus
   void sendRaucInstallRequest(const std::string& bundlePath) const;
   // RAUC-related configurations and proxy object for DBus communication
-  data::ResultCode::Numeric installResult;
-  std::string installResultDes;
-  std::string installationError;
+  data::ResultCode::Numeric installResultCode;
+  std::string installResultDescription;
+  std::string installationResultError;
   // Atomic flag to indicate whether the installation is complete
   std::atomic<bool> installationComplete;
   std::atomic<bool> installationErrorLogged;
   std::shared_ptr<sdbus::IProxy> raucProxy_;
-  int result;
-
   std::unique_ptr<Bootloader> bootloader_;
 };
 

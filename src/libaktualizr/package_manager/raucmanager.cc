@@ -26,7 +26,7 @@ RaucManager::RaucManager(const PackageConfig &pconfig, const BootloaderConfig &b
                              Bootloader *bootloader)
     : PackageManagerInterface(pconfig, BootloaderConfig(), storage, http),
       bootloader_(bootloader == nullptr ? new Bootloader(bconfig, *storage) : bootloader) {
-  // this->installResult = data::ResultCode::Numeric::kUnknown;
+  this->installResult = data::ResultCode::Numeric::kUnknown;
   this->installResultDes = std::string("");
   const char* serviceName = "de.pengutronix.rauc";
   const char* objectPath = "/";
@@ -37,7 +37,7 @@ RaucManager::RaucManager(const PackageConfig &pconfig, const BootloaderConfig &b
   // Register signal handlers
   this->raucProxy_->uponSignal("Completed")
       .onInterface("de.pengutronix.rauc.Installer")
-      .call([this](const std::int32_t& status) { this->onCompleted(result); });
+      .call([this](const std::int32_t& status) { this->onCompleted(status); });
 
   this->raucProxy_->uponSignal("PropertiesChanged")
       .onInterface("org.freedesktop.DBus.Properties")
@@ -46,53 +46,98 @@ RaucManager::RaucManager(const PackageConfig &pconfig, const BootloaderConfig &b
         this->onProgressChanged(interfaceName, changedProperties, invalidProperties);
       });
 
-  // Optional: Ensure we start listening to the bus
   this->raucProxy_->finishRegistration();
 }
 
-void RaucManager::handleRaucResponse(data::ResultCode::Numeric resultCode) {
-    installResult = resultCode;
-    if(installResult == data::ResultCode::Numeric::kNeedCompletion) {
-      installResultDes = "Installation Completed Successfully, restart required";
-    }
-    else if (installResult == data::ResultCode::Numeric::kInstallFailed) {
-      // make rauc status mark-active call
-      while(!installationErrorLogged) {
-        sleep(1);
-      }
-      installResultDes = installationError;
-      try {
-            std::string state = "active";
-            std::string slot_identifier = "booted";  // Could also be "other" or a specific slot identifier
-            std::string slot_name;  // This will be filled by the call (output)
-            std::string message;  // This will be filled by the call (output)
+// Fetch target using Uptane Fetcher (dummy implementation)
+bool RaucManager::fetchTarget(const Uptane::Target& target, Uptane::Fetcher& fetcher, const KeyManager& keys,
+                              const FetcherProgressCb& progress_cb, const api::FlowControlToken* token) {
+  if (!target.IsRauc()) {
+    // The case when the OSTree package manager is set as a package manager for aktualizr
+    // while the target is aimed for a Secondary ECU that is configured with another/non-OSTree package manager
+    return PackageManagerInterface::fetchTarget(target, fetcher, keys, progress_cb, token);
+  }
+  installationComplete.store(false);
+  installationErrorLogged.store(false);                              
+  return true;
+}
 
-            // Call the `Mark` method
-            raucProxy_->callMethod("Mark").onInterface("de.pengutronix.rauc.Installer")
-                .withArguments(state, slot_identifier)
-                .storeResultsTo(slot_name, message);  // Capture the output parameters
-            
-            std::cout << "Mark-active call successful: " << message << std::endl;
-            std::cout << "Activated slot: " << slot_name << std::endl;
-            
-        } catch (const std::exception& e) {
-            std::cerr << "Error calling RAUC Mark method: " << e.what() << std::endl;
-        }
+// TODO: implement error handling
+data::InstallationResult RaucManager::install(const Uptane::Target& target) const {
+    // Extract bundle URI from the target object
+    std::string bundlePath = target.uri();
+    // if(bundlePath == std::string::empty) {
+    //   return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to get the bundle path from target");
+    // }
+    
+    // Extract SHA256 hash from the target object
+    std::string sha256Hash = target.custom_data()["rauc"]["rawHashes"]["sha256"].asString();  // Assuming Uptane::Target has this structure
+    // if(sha256Hash == std::string::empty) {
+    //   return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to get the root sha256 hash from target");
+    // }
+
+    // Write the SHA256 hash to the expected file
+    try {
+        writeHashToFile(sha256Hash);
+    } catch (const std::exception& e) {
+        std::cerr << "Error writing hash to file: " << e.what() << std::endl;
+        return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to write SHA256 hash to file");
     }
-    installationComplete.store(true);
-    return;
+
+    // Send RAUC installation request
+    try {
+        sendRaucInstallRequest(bundlePath);
+        std::cout << "Installation request sent for bundle: " << bundlePath << std::endl;
+    } catch (const std::runtime_error& e) {
+        std::cerr << e.what() << std::endl;
+        return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to send RAUC installation request");
+    }
+
+    // Monitor RAUC signals for the result
+    // Wait for the 'Completed' signal
+    while (!installationComplete.load()) {
+        sleep(1);
+    }
+
+    // set reboot flag to be notified later
+    if (bootloader_ != nullptr) {
+      bootloader_->rebootFlagSet();
+    }
+
+    sync();
+    return data::InstallationResult(this->installResult, this->installResultDescription);  // The actual result will come from the signal handlers
+}
+
+// Send a RAUC install request over DBus
+void RaucManager::sendRaucInstallRequest(const std::string& bundlePath) const {
+  auto method = this->raucProxy_->createMethodCall("de.pengutronix.rauc.Installer", "InstallBundle");
+  method << bundlePath;
+
+  try {
+    this->raucProxy_->callMethod(method);
+  } catch (const sdbus::Error& e) {
+    throw std::runtime_error("Failed to send RAUC install request: " + e.getMessage());
+  }
 }
 
 // Signal handler for "Completed" event
 void RaucManager::onCompleted(const std::int32_t& status) {
   if (status == 0) {
-    std::cout << "Installation completed successfully with status code: " << status << std::endl;
-    handleRaucResponse(data::ResultCode::Numeric::kNeedCompletion);
-  } else {
-    std::cout << "Installation did not complete successfully with status code: " << status << std::endl;
-    handleRaucResponse(data::ResultCode::Numeric::kInstallFailed);
-  }
-  return;
+      // std::cout << "Installation completed successfully with status code: " << status << std::endl;
+      installResultCode = data::ResultCode::Numeric::kNeedCompletion;
+      installResultDescription = "Installation Completed Successfully, restart required";
+      // handleRaucResponse(data::ResultCode::Numeric::kNeedCompletion);
+    } else {
+      // std::cout << "Installation did not complete successfully with status code: " << status << std::endl;
+      while(!installationErrorLogged) {
+        sleep(1);
+      }
+      installResultCode = data::ResultCode::Numeric::kInstallFailed;
+      installResultDescription = installationError;
+      // handleRaucResponse(data::ResultCode::Numeric::kInstallFailed);
+    }
+    installationComplete.store(true);
+    return;
 }
 
 // Signal handler for "PropertiesChanged" event (progress updates)
@@ -123,20 +168,6 @@ void RaucManager::onProgressChanged(const std::string& interfaceName,
   }
 }
 
-// Send a RAUC install request over DBus
-void RaucManager::sendRaucInstallRequest(const std::string& bundlePath) const {
-  auto method = this->raucProxy_->createMethodCall("de.pengutronix.rauc.Installer", "InstallBundle");
-  method << bundlePath;
-
-  try {
-    // installationComplete.store(false);
-    // installationErrorLogged.store(false);
-    this->raucProxy_->callMethod(method);
-  } catch (const sdbus::Error& e) {
-    throw std::runtime_error("Failed to send RAUC install request: " + e.getMessage());
-  }
-}
-
 Json::Value RaucManager::getInstalledPackages() const {
   std::string packages_str = Utils::readFile(config.packages_file);
   std::vector<std::string> package_lines;
@@ -159,7 +190,7 @@ Json::Value RaucManager::getInstalledPackages() const {
   return packages;
 }
 
-std::string getCurrentHash() {
+std::string RaucManager::getCurrentHash() const {
   std::string hash = "83d05b9198e383da6d9934aac72678935afae6a046f4adf99d386975cb9d1d69";
   return hash;
 }
@@ -205,6 +236,34 @@ Uptane::Target RaucManager::getCurrent() const {
   return {"unknown", ecus, hashes, 0, "RAUC"};
 }
 
+void RaucManager::completeInstall() const {
+  // LOG_INFO << "About to reboot the system in order to apply pending updates...";
+  bootloader_->reboot();
+}
+
+// Finalize the installation
+data::InstallationResult RaucManager::finalizeInstall(const Uptane::Target& target) {
+  if (!bootloader_->rebootDetected()) {
+    return data::InstallationResult(data::ResultCode::Numeric::kNeedCompletion,
+                                    "Reboot is required for the pending update application");
+  }
+
+  // LOG_INFO << "Checking installation of new OSTree sysroot";
+  const std::string current_hash = getCurrentHash();
+
+  data::InstallationResult install_result =
+      data::InstallationResult(data::ResultCode::Numeric::kOk, "Successfully booted on new version");
+
+  if (current_hash != target.sha256Hash()) {
+    // LOG_ERROR << "Expected to boot " << target.sha256Hash() << " but found " << current_hash
+    //           << ". The system may have been rolled back.";
+    install_result = data::InstallationResult(data::ResultCode::Numeric::kInstallFailed, "Wrong version booted");
+  }
+
+  bootloader_->rebootFlagClear();
+  return install_result;
+}
+
 // Function to create the /run/aktualizr directory if it does not exist
 void createDirectoryIfNotExists(const std::string& directoryPath)
 {
@@ -248,84 +307,47 @@ void writeHashToFile(const std::string& hash)
 }
 
 
-// TODO: implement error handling
-// Install a target using RAUC
-data::InstallationResult RaucManager::install(const Uptane::Target& target) const {
-    // Extract bundle URI from the target object
-    std::string bundlePath = target.uri();
-    // if(bundlePath == std::string::empty) {
-    //   return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to get the bundle path from target");
-    // }
-    
-    // Extract SHA256 hash from the target object
-    std::string sha256Hash = target.custom_data()["rauc"]["rawHashes"]["sha256"].asString();  // Assuming Uptane::Target has this structure
-    // if(sha256Hash == std::string::empty) {
-    //   return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to get the root sha256 hash from target");
-    // }
-
-    // Write the SHA256 hash to the expected file
-    try {
-        writeHashToFile(sha256Hash);
-    } catch (const std::exception& e) {
-        std::cerr << "Error writing hash to file: " << e.what() << std::endl;
-        return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to write SHA256 hash to file");
-    }
-
-    // Send RAUC installation request
-    try {
-        sendRaucInstallRequest(bundlePath);
-        std::cout << "Installation request sent for bundle: " << bundlePath << std::endl;
-    } catch (const std::runtime_error& e) {
-        std::cerr << e.what() << std::endl;
-        return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to send RAUC installation request");
-    }
-
-    // Monitor RAUC signals for the result
-    // Wait for the 'Completed' signal
-    while (!installationComplete.load()) {
-        sleep(1);
-    }
-
-    return data::InstallationResult(this->installResult, this->installResultDes);  // The actual result will come from the signal handlers
-}
-
-void RaucManager::completeInstall() const {
-  // LOG_INFO << "About to reboot the system in order to apply pending updates...";
-  bootloader_->reboot();
-}
-
-// Finalize the installation
-data::InstallationResult RaucManager::finalizeInstall(const Uptane::Target& target) {
-  if (!bootloader_->rebootDetected()) {
-    return data::InstallationResult(data::ResultCode::Numeric::kNeedCompletion,
-                                    "Reboot is required for the pending update application");
-  }
-
-  // LOG_INFO << "Checking installation of new OSTree sysroot";
-  const std::string current_hash = getCurrentHash();
-
-  data::InstallationResult install_result =
-      data::InstallationResult(data::ResultCode::Numeric::kOk, "Successfully booted on new version");
-
-  if (current_hash != target.sha256Hash()) {
-    // LOG_ERROR << "Expected to boot " << target.sha256Hash() << " but found " << current_hash
-    //           << ". The system may have been rolled back.";
-    install_result = data::InstallationResult(data::ResultCode::Numeric::kInstallFailed, "Wrong version booted");
-  }
-
-  bootloader_->rebootFlagClear();
-  return install_result;
-}
-
-// Fetch target using Uptane Fetcher (stub implementation)
-bool RaucManager::fetchTarget(const Uptane::Target& target, Uptane::Fetcher& fetcher, const KeyManager& keys,
-                              const FetcherProgressCb& progress_cb, const api::FlowControlToken* token) {
-  // Implement Uptane fetch logic if necessary
-  return true;
-}
 
 // Verify the target (stub implementation)
 TargetStatus RaucManager::verifyTarget(const Uptane::Target& target) const {
-  // Implement verification logic based on RAUC metadata
+  if (!target.IsOstree()) {
+    // The case when the OSTree package manager is set as a package manager for aktualizr
+    // while the target is aimed for a Secondary ECU that is configured with another/non-OSTree package manager
+    return PackageManagerInterface::verifyTarget(target);
+  }
   return TargetStatus::kGood;
 }
+
+
+// void RaucManager::handleRaucResponse(data::ResultCode::Numeric resultCode) {
+//     installResult = resultCode;
+//     if(installResult == data::ResultCode::Numeric::kNeedCompletion) {
+      
+//     }
+//     else if (installResult == data::ResultCode::Numeric::kInstallFailed) {
+//       // make rauc status mark-active call
+//       while(!installationErrorLogged) {
+//         sleep(1);
+//       }
+//       installResultDescription = installationError;
+//       try {
+//             std::string state = "active";
+//             std::string slot_identifier = "booted";  // Could also be "other" or a specific slot identifier
+//             std::string slot_name;  // This will be filled by the call (output)
+//             std::string message;  // This will be filled by the call (output)
+
+//             // Call the `Mark` method
+//             raucProxy_->callMethod("Mark").onInterface("de.pengutronix.rauc.Installer")
+//                 .withArguments(state, slot_identifier)
+//                 .storeResultsTo(slot_name, message);  // Capture the output parameters
+            
+//             std::cout << "Mark-active call successful: " << message << std::endl;
+//             std::cout << "Activated slot: " << slot_name << std::endl;
+            
+//         } catch (const std::exception& e) {
+//             std::cerr << "Error calling RAUC Mark method: " << e.what() << std::endl;
+//         }
+//     }
+//     installationComplete.store(true);
+//     return;
+// }
