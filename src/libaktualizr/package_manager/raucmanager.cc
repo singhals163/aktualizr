@@ -157,11 +157,50 @@ Json::Value RaucManager::getInstalledPackages() const {
   return packages;
 }
 
-// Get the current target (stub implementation)
+std::string getCurrentHash() {
+  std::string hash = "83d05b9198e383da6d9934aac72678935afae6a046f4adf99d386975cb9d1d69";
+  return hash;
+}
+
 Uptane::Target RaucManager::getCurrent() const {
-  Uptane::Target currentTarget;
-  // Implement logic for retrieving current target
-  return currentTarget;
+  const std::string current_hash = getCurrentHash();
+  boost::optional<Uptane::Target> current_version;
+  // This may appear Primary-specific, but since Secondaries only know about
+  // themselves, this actually works just fine for them, too.
+  storage_->loadPrimaryInstalledVersions(&current_version, nullptr);
+
+  if (!!current_version && current_version->sha256Hash() == current_hash) {
+    return *current_version;
+  }
+
+  // LOG_ERROR << "Current versions in storage and reported by OSTree do not match";
+
+  // Look into installation log to find a possible candidate. Again, despite the
+  // name, this will work for Secondaries as well.
+  std::vector<Uptane::Target> installed_versions;
+  storage_->loadPrimaryInstallationLog(&installed_versions, false);
+
+  // Version should be in installed versions. It's possible that multiple
+  // targets could have the same sha256Hash. In this case the safest assumption
+  // is that the most recent (the reverse of the vector) target is what we
+  // should return.
+  std::vector<Uptane::Target>::reverse_iterator it;
+  for (it = installed_versions.rbegin(); it != installed_versions.rend(); it++) {
+    if (it->sha256Hash() == current_hash) {
+      return *it;
+    }
+  }
+  // We haven't found a matching target. This can occur when a device is
+  // freshly manufactured and the factory image is in a delegated target.
+  // Aktualizr will have had no reason to fetch the relevant delegation, and it
+  // doesn't know where in the delegation tree on the server it might be.
+  // See https://github.com/uptane/aktualizr/issues/1 for more details. In this
+  // case attempt to construct an approximate Uptane target. By getting the
+  // hash correct the server has a chance to figure out what is running on the
+  // device.
+  Uptane::EcuMap ecus;
+  std::vector<Hash> hashes{Hash(Hash::Type::kSha256, current_hash)};
+  return {"unknown", ecus, hashes, 0, "RAUC"};
 }
 
 // Function to create the /run/aktualizr directory if it does not exist
@@ -212,9 +251,9 @@ void writeHashToFile(const std::string& hash)
 data::InstallationResult RaucManager::install(const Uptane::Target& target) {
     // Extract bundle URI from the target object
     std::string bundlePath = target.uri();
-    if(!bundlePath) {
-      return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to get the bundle path from target");
-    }
+    // if(bundlePath == std::string::empty) {
+    //   return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to get the bundle path from target");
+    // }
     
     // Extract SHA256 hash from the target object
     std::string sha256Hash = target.custom()["rauc"]["rawHashes"]["sha256"].asString();  // Assuming Uptane::Target has this structure
@@ -255,8 +294,25 @@ void OstreeManager::completeInstall() const {
 
 // Finalize the installation
 data::InstallationResult RaucManager::finalizeInstall(const Uptane::Target& target) {
-  // Finalization logic for RAUC installations (can be customized based on RAUC API)
-  return data::InstallationResult(data::ResultCode::Numeric::kOk, this->installResultDes);
+  if (!bootloader_->rebootDetected()) {
+    return data::InstallationResult(data::ResultCode::Numeric::kNeedCompletion,
+                                    "Reboot is required for the pending update application");
+  }
+
+  // LOG_INFO << "Checking installation of new OSTree sysroot";
+  const std::string current_hash = getCurrentHash();
+
+  data::InstallationResult install_result =
+      data::InstallationResult(data::ResultCode::Numeric::kOk, "Successfully booted on new version");
+
+  if (current_hash != target.sha256Hash()) {
+    // LOG_ERROR << "Expected to boot " << target.sha256Hash() << " but found " << current_hash
+    //           << ". The system may have been rolled back.";
+    install_result = data::InstallationResult(data::ResultCode::Numeric::kInstallFailed, "Wrong version booted");
+  }
+
+  bootloader_->rebootFlagClear();
+  return install_result;
 }
 
 // Fetch target using Uptane Fetcher (stub implementation)
@@ -270,22 +326,4 @@ bool RaucManager::fetchTarget(const Uptane::Target& target, Uptane::Fetcher& fet
 TargetStatus RaucManager::verifyTarget(const Uptane::Target& target) const {
   // Implement verification logic based on RAUC metadata
   return TargetStatus::kGood;
-}
-
-// Check available disk space
-bool RaucManager::checkAvailableDiskSpace(uint64_t required_bytes) const {
-  // Implement logic to check disk space
-  return true;
-}
-
-// Send a RAUC install request over DBus
-void RaucManager::sendRaucInstallRequest(const std::string& bundlePath) const {
-  auto method = this->raucProxy_->createMethodCall("de.pengutronix.rauc.Installer", "InstallBundle");
-  method << bundlePath;
-
-  try {
-    this->raucProxy_->callMethod(method);
-  } catch (const sdbus::Error& e) {
-    throw std::runtime_error("Failed to send RAUC install request: " + e.getMessage());
-  }
 }
