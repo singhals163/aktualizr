@@ -2,8 +2,11 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include "libaktualizr/packagemanagerfactory.h"
+#include "logging/logging.h"
 
-
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+AUTO_REGISTER_PACKAGE_MANAGER(PACKAGE_MANAGER_RAUC, RaucManager);
 
 /*
 TODO:
@@ -14,7 +17,9 @@ TODO:
     - **solution, call rauc status mark-active from aktualizr in case of error** (done)
 4. Implement the post-install-handler (done)
 5. Handle the error separately saying no reboot is required in this case. 
-6. 
+6. Handle the error case correctly and don't set the reboot flag in install()
+7. Update the various required fields in the target (done)
+8. 
 
 */
 
@@ -52,26 +57,33 @@ RaucManager::RaucManager(const PackageConfig &pconfig, const BootloaderConfig &b
 // Fetch target using Uptane Fetcher (dummy implementation)
 bool RaucManager::fetchTarget(const Uptane::Target& target, Uptane::Fetcher& fetcher, const KeyManager& keys,
                               const FetcherProgressCb& progress_cb, const api::FlowControlToken* token) {
+  LOG_INFO << "we reached rauc fetchTarget ";
   if (!target.IsRauc()) {
-    // The case when the OSTree package manager is set as a package manager for aktualizr
-    // while the target is aimed for a Secondary ECU that is configured with another/non-OSTree package manager
-    return PackageManagerInterface::fetchTarget(target, fetcher, keys, progress_cb, token);
+  //   // The case when the OSTree package manager is set as a package manager for aktualizr
+  //   // while the target is aimed for a Secondary ECU that is configured with another/non-OSTree package manager
+    LOG_ERROR << "This code shouldn't be triggered";
+    // return PackageManagerInterface::fetchTarget(target, fetcher, keys, progress_cb, token);
   }
   installationComplete.store(false);
-  installationErrorLogged.store(false);                              
+  installationErrorLogged.store(false);             
+  LOG_INFO << "finally on the right path";                 
   return true;
 }
 
 // TODO: implement error handling
 data::InstallationResult RaucManager::install(const Uptane::Target& target) const {
+  LOG_INFO << "called RaucManager::install()";
     // Extract bundle URI from the target object
     std::string bundlePath = target.uri();
+    LOG_INFO << "uri: " << bundlePath;
     // if(bundlePath == std::string::empty) {
     //   return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to get the bundle path from target");
     // }
     
     // Extract SHA256 hash from the target object
     std::string sha256Hash = target.custom_data()["rauc"]["rawHashes"]["sha256"].asString();  // Assuming Uptane::Target has this structure
+    LOG_INFO << "sha256Hash: " << sha256Hash;
+    LOG_INFO << "target.custom" << target.custom_data();
     // if(sha256Hash == std::string::empty) {
     //   return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to get the root sha256 hash from target");
     // }
@@ -80,7 +92,7 @@ data::InstallationResult RaucManager::install(const Uptane::Target& target) cons
     try {
         writeHashToFile(sha256Hash);
     } catch (const std::exception& e) {
-        std::cerr << "Error writing hash to file: " << e.what() << std::endl;
+        LOG_ERROR << "Error writing hash to file: " << e.what() << std::endl;
         return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to write SHA256 hash to file");
     }
 
@@ -89,7 +101,7 @@ data::InstallationResult RaucManager::install(const Uptane::Target& target) cons
         sendRaucInstallRequest(bundlePath);
         // std::cout << "Installation request sent for bundle: " << bundlePath << std::endl;
     } catch (const std::runtime_error& e) {
-        std::cerr << e.what() << std::endl;
+        LOG_ERROR << e.what() << std::endl;
         return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to send RAUC installation request");
     }
 
@@ -105,13 +117,17 @@ data::InstallationResult RaucManager::install(const Uptane::Target& target) cons
     }
 
     sync();
+    LOG_INFO << "correctly finished RaucManager::install()";
     return data::InstallationResult(this->installResultCode, this->installResultDescription);  // The actual result will come from the signal handlers
 }
 
 // Send a RAUC install request over DBus
 void RaucManager::sendRaucInstallRequest(const std::string& bundlePath) const {
+  LOG_INFO << "called RaucManager::sendRaucInstallRequest()";
   auto method = this->raucProxy_->createMethodCall("de.pengutronix.rauc.Installer", "InstallBundle");
+  std::map<std::string, sdbus::Variant> args;
   method << bundlePath;
+  method << args;
 
   try {
     this->raucProxy_->callMethod(method);
@@ -122,6 +138,7 @@ void RaucManager::sendRaucInstallRequest(const std::string& bundlePath) const {
 
 // Signal handler for "Completed" event
 void RaucManager::onCompleted(const std::int32_t& status) {
+  LOG_INFO << "called RaucManager::getInstalledPackages() status: " << status;
   if (status == 0) {
       // std::cout << "Installation completed successfully with status code: " << status << std::endl;
       installResultCode = data::ResultCode::Numeric::kNeedCompletion;
@@ -151,17 +168,17 @@ void RaucManager::onProgressChanged(const std::string& interfaceName,
       auto percentage = progress.get<0>();
       auto message = progress.get<1>();
       auto depth = progress.get<2>();
-      // std::cout << "|";
-      // for (int i = 1; i < depth; i++) {
-      //   std::cout << "  |";
-      // }
-      // std::cout << "-\"" << message << "\" (" << percentage << "%)\n";
+      LOG_INFO << "|";
+      for (int i = 1; i < depth; i++) {
+        LOG_INFO << "  |";
+      }
+      LOG_INFO << "-\"" << message << "\" (" << percentage << "%)\n";
     }
 
     auto itError = changedProperties.find("LastError");
     if (itError != changedProperties.end()) {
       std::string lastError = itError->second.get<std::string>();
-      std::cerr << "Last Error: " << lastError << std::endl;
+      LOG_ERROR << "Last Error: " << lastError << std::endl;
       installResultError = lastError;
       installationErrorLogged.store(true);
     }
@@ -169,6 +186,7 @@ void RaucManager::onProgressChanged(const std::string& interfaceName,
 }
 
 Json::Value RaucManager::getInstalledPackages() const {
+  LOG_INFO << "called RaucManager::getInstalledPackages()";
   std::string packages_str = Utils::readFile(config.packages_file);
   std::vector<std::string> package_lines;
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
@@ -191,11 +209,13 @@ Json::Value RaucManager::getInstalledPackages() const {
 }
 
 std::string RaucManager::getCurrentHash() const {
+  LOG_INFO << "called RaucManager::getCurrentHash()";
   std::string hash = "83d05b9198e383da6d9934aac72678935afae6a046f4adf99d386975cb9d1d69";
   return hash;
 }
 
 Uptane::Target RaucManager::getCurrent() const {
+  LOG_INFO << "called RaucManager::getCurrent()";
   const std::string current_hash = getCurrentHash();
   boost::optional<Uptane::Target> current_version;
   // This may appear Primary-specific, but since Secondaries only know about
@@ -206,23 +226,23 @@ Uptane::Target RaucManager::getCurrent() const {
     return *current_version;
   }
 
-  // LOG_ERROR << "Current versions in storage and reported by OSTree do not match";
+  LOG_ERROR << "Current versions in storage and reported by RAUC do not match";
 
   // Look into installation log to find a possible candidate. Again, despite the
   // name, this will work for Secondaries as well.
-  std::vector<Uptane::Target> installed_versions;
-  storage_->loadPrimaryInstallationLog(&installed_versions, false);
+  // std::vector<Uptane::Target> installed_versions;
+  // storage_->loadPrimaryInstallationLog(&installed_versions, false);
 
   // Version should be in installed versions. It's possible that multiple
   // targets could have the same sha256Hash. In this case the safest assumption
   // is that the most recent (the reverse of the vector) target is what we
   // should return.
-  std::vector<Uptane::Target>::reverse_iterator it;
-  for (it = installed_versions.rbegin(); it != installed_versions.rend(); it++) {
-    if (it->sha256Hash() == current_hash) {
-      return *it;
-    }
-  }
+  // std::vector<Uptane::Target>::reverse_iterator it;
+  // for (it = installed_versions.rbegin(); it != installed_versions.rend(); it++) {
+  //   if (it->sha256Hash() == current_hash) {
+  //     return *it;
+  //   }
+  // }
   // We haven't found a matching target. This can occur when a device is
   // freshly manufactured and the factory image is in a delegated target.
   // Aktualizr will have had no reason to fetch the relevant delegation, and it
@@ -231,32 +251,34 @@ Uptane::Target RaucManager::getCurrent() const {
   // case attempt to construct an approximate Uptane target. By getting the
   // hash correct the server has a chance to figure out what is running on the
   // device.
-  Uptane::EcuMap ecus;
-  std::vector<Hash> hashes{Hash(Hash::Type::kSha256, current_hash)};
-  return {"unknown", ecus, hashes, 0, "RAUC"};
+  // Uptane::EcuMap ecus;
+  // std::vector<Hash> hashes{Hash(Hash::Type::kSha256, current_hash)};
+  return Uptane::Target::Unknown();
 }
 
 void RaucManager::completeInstall() const {
-  // LOG_INFO << "About to reboot the system in order to apply pending updates...";
+  LOG_INFO << "called RaucManager::completeInstall()";
+  LOG_INFO << "About to reboot the system in order to apply pending updates...";
   bootloader_->reboot();
 }
 
 // Finalize the installation
 data::InstallationResult RaucManager::finalizeInstall(const Uptane::Target& target) {
+  LOG_INFO << "called RaucManager::finalizeInstall()";
   if (!bootloader_->rebootDetected()) {
     return data::InstallationResult(data::ResultCode::Numeric::kNeedCompletion,
                                     "Reboot is required for the pending update application");
   }
 
-  // LOG_INFO << "Checking installation of new OSTree sysroot";
+  LOG_INFO << "Checking installation of new OSTree sysroot";
   const std::string current_hash = getCurrentHash();
 
   data::InstallationResult install_result =
       data::InstallationResult(data::ResultCode::Numeric::kOk, "Successfully booted on new version");
 
   if (current_hash != target.sha256Hash()) {
-    // LOG_ERROR << "Expected to boot " << target.sha256Hash() << " but found " << current_hash
-    //           << ". The system may have been rolled back.";
+    LOG_ERROR << "Expected to boot " << target.sha256Hash() << " but found " << current_hash
+              << ". The system may have been rolled back.";
     install_result = data::InstallationResult(data::ResultCode::Numeric::kInstallFailed, "Wrong version booted");
   }
 
@@ -267,6 +289,7 @@ data::InstallationResult RaucManager::finalizeInstall(const Uptane::Target& targ
 // Function to create the /run/aktualizr directory if it does not exist
 void RaucManager::createDirectoryIfNotExists(const std::string& directoryPath) const
 {
+    LOG_INFO << "called RaucManager::createDirectoryIfNotExists()";
     struct stat st;
     if (stat(directoryPath.c_str(), &st) != 0) {
         // Directory does not exist, create it
@@ -281,6 +304,7 @@ void RaucManager::createDirectoryIfNotExists(const std::string& directoryPath) c
 // Function to write the SHA256 hash to /run/aktualizr/expected-digest
 void RaucManager::writeHashToFile(const std::string& hash) const
 {
+    LOG_INFO << "called RaucManager::writeHashToFile()";
     const std::string directoryPath = "/run/aktualizr";
     const std::string filePath = directoryPath + "/expected-digest";
 
@@ -311,12 +335,18 @@ void RaucManager::writeHashToFile(const std::string& hash) const
 
 // Verify the target (stub implementation)
 TargetStatus RaucManager::verifyTarget(const Uptane::Target& target) const {
-  if (!target.IsOstree()) {
+  if (!target.IsRauc()) {
     // The case when the OSTree package manager is set as a package manager for aktualizr
     // while the target is aimed for a Secondary ECU that is configured with another/non-OSTree package manager
-    return PackageManagerInterface::verifyTarget(target);
+    // return PackageManagerInterface::verifyTarget(target);
   }
+  LOG_INFO << "called RaucManager::verifyTarget()";
   return TargetStatus::kGood;
+}
+
+bool RaucManager::checkAvailableDiskSpace(uint64_t required_bytes) const {
+  LOG_INFO << "called RaucManager::checkAvailableDiskSpace()";
+  return true;
 }
 
 

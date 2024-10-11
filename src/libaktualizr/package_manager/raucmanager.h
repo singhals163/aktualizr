@@ -40,6 +40,7 @@ class RaucManager : public PackageManagerInterface {
   bool fetchTarget(const Uptane::Target& target, Uptane::Fetcher& fetcher, const KeyManager& keys,
                    const FetcherProgressCb& progress_cb, const api::FlowControlToken* token) override;
   TargetStatus verifyTarget(const Uptane::Target& target) const override;
+  bool checkAvailableDiskSpace(uint64_t required_bytes) const override;
 
  private:
   // void handleRaucResponse(data::ResultCode::Numeric resultCode);

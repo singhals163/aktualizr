@@ -370,7 +370,8 @@ set (AKTUALIZR_EXTERNAL_LIBS
     Threads::Threads
     ${sodium_LIBRARY_RELEASE}
     ${LIBOSTREE_LIBRARIES}
-    ${SDBUSCPP_LIBRARIES}
+    # ${sdbus-c++_LIBRARIES}
+    SDBusCpp::sdbus-c++
     ${SQLITE3_LIBRARIES}
     ${LibArchive_LIBRARIES}
     ${LIBP11_LIBRARIES}
