@@ -8,23 +8,6 @@
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 AUTO_REGISTER_PACKAGE_MANAGER(PACKAGE_MANAGER_RAUC, RaucManager);
 
-/*
-TODO:
-1. If post-install-handler script fails, it returns an error.
-2. print the expected root hash on some file. (done)
-3. We should handle the exception and change the bootloder config in the post-install-handler script itself. (Difficult to manage the bootloader from the aktualizr) 
-    - Not possible because we can't send another request to rauc while the previous one is not served, therefore can't call `rauc status mark-bad` from post-install-handler
-    - **solution, call rauc status mark-active from aktualizr in case of error** (done)
-4. Implement the post-install-handler (done)
-5. Handle the error separately saying no reboot is required in this case. 
-6. Handle the error case correctly and don't set the reboot flag in install()
-7. Update the various required fields in the target (done)
-8. 
-
-*/
-
-
-
 // Constructor: Initializes RAUC proxy and registers signal handlers
 RaucManager::RaucManager(const PackageConfig &pconfig, const BootloaderConfig &bconfig,
                              const std::shared_ptr<INvStorage> &storage, const std::shared_ptr<HttpInterface> &http,
@@ -56,25 +39,21 @@ RaucManager::RaucManager(const PackageConfig &pconfig, const BootloaderConfig &b
   this->raucProxy_->finishRegistration();
 }
 
-// Fetch target using Uptane Fetcher (dummy implementation)
+// Fetch target 
 bool RaucManager::fetchTarget(const Uptane::Target& target, Uptane::Fetcher& fetcher, const KeyManager& keys,
                               const FetcherProgressCb& progress_cb, const api::FlowControlToken* token) {
-  LOG_INFO << "we reached rauc fetchTarget ";
   if (!target.IsRauc()) {
-  //   // The case when the OSTree package manager is set as a package manager for aktualizr
-  //   // while the target is aimed for a Secondary ECU that is configured with another/non-OSTree package manager
-    LOG_ERROR << "This code shouldn't be triggered";
-    // return PackageManagerInterface::fetchTarget(target, fetcher, keys, progress_cb, token);
+    // The case when the OSTree package manager is set as a package manager for aktualizr
+    // while the target is aimed for a Secondary ECU that is configured with another/non-OSTree package manager
+    return PackageManagerInterface::fetchTarget(target, fetcher, keys, progress_cb, token);
   }
   installationComplete.store(false);
   installationErrorLogged.store(false);             
-  LOG_INFO << "finally on the right path";                 
   return true;
 }
 
-// TODO: implement error handling
 data::InstallationResult RaucManager::install(const Uptane::Target& target) const {
-  LOG_INFO << "called RaucManager::install()";
+
     // Extract bundle URI from the target object
     std::string bundlePath = target.uri();
     LOG_INFO << "uri: " << bundlePath;
@@ -84,8 +63,8 @@ data::InstallationResult RaucManager::install(const Uptane::Target& target) cons
     
     // Extract SHA256 hash from the target object
     std::string sha256Hash = target.custom_data()["rauc"]["rawHashes"]["sha256"].asString();  // Assuming Uptane::Target has this structure
-    LOG_INFO << "sha256Hash: " << sha256Hash;
-    LOG_INFO << "target.custom" << target.custom_data();
+    // LOG_INFO << "sha256Hash: " << sha256Hash;
+    // LOG_INFO << "target.custom" << target.custom_data();
     // if(sha256Hash == std::string::empty) {
     //   return data::InstallationResult(data::ResultCode::Numeric::kGeneralError, "Failed to get the root sha256 hash from target");
     // }
@@ -111,6 +90,10 @@ data::InstallationResult RaucManager::install(const Uptane::Target& target) cons
     // Wait for the 'Completed' signal
     while (!installationComplete.load()) {
         sleep(1);
+    }
+
+    if(this->installResultCode == data::ResultCode::Numeric::kInstallFailed) {
+      return data::InstallationResult(this->installResultCode, this->installResultDescription);
     }
 
     // set reboot flag to be notified later
@@ -374,12 +357,12 @@ void RaucManager::writeHashToFile(const std::string& hash) const
 
 
 
-// Verify the target (stub implementation)
+// Verify the target
 TargetStatus RaucManager::verifyTarget(const Uptane::Target& target) const {
   if (!target.IsRauc()) {
     // The case when the OSTree package manager is set as a package manager for aktualizr
     // while the target is aimed for a Secondary ECU that is configured with another/non-OSTree package manager
-    // return PackageManagerInterface::verifyTarget(target);
+    return PackageManagerInterface::verifyTarget(target);
   }
   LOG_INFO << "called RaucManager::verifyTarget()";
   return TargetStatus::kGood;
@@ -389,37 +372,3 @@ bool RaucManager::checkAvailableDiskSpace(uint64_t required_bytes) const {
   LOG_INFO << "called RaucManager::checkAvailableDiskSpace()";
   return true;
 }
-
-
-// void RaucManager::handleRaucResponse(data::ResultCode::Numeric resultCode) {
-//     installResult = resultCode;
-//     if(installResult == data::ResultCode::Numeric::kNeedCompletion) {
-      
-//     }
-//     else if (installResult == data::ResultCode::Numeric::kInstallFailed) {
-//       // make rauc status mark-active call
-//       while(!installationErrorLogged) {
-//         sleep(1);
-//       }
-//       installResultDescription = installationError;
-//       try {
-//             std::string state = "active";
-//             std::string slot_identifier = "booted";  // Could also be "other" or a specific slot identifier
-//             std::string slot_name;  // This will be filled by the call (output)
-//             std::string message;  // This will be filled by the call (output)
-
-//             // Call the `Mark` method
-//             raucProxy_->callMethod("Mark").onInterface("de.pengutronix.rauc.Installer")
-//                 .withArguments(state, slot_identifier)
-//                 .storeResultsTo(slot_name, message);  // Capture the output parameters
-            
-//             std::cout << "Mark-active call successful: " << message << std::endl;
-//             std::cout << "Activated slot: " << slot_name << std::endl;
-            
-//         } catch (const std::exception& e) {
-//             std::cerr << "Error calling RAUC Mark method: " << e.what() << std::endl;
-//         }
-//     }
-//     installationComplete.store(true);
-//     return;
-// }
