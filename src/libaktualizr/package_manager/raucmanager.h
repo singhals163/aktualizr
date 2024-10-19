@@ -65,6 +65,9 @@ class RaucManager : public PackageManagerInterface {
   // Atomic flag to indicate whether the installation is complete
   std::atomic<bool> installationComplete;
   std::atomic<bool> installationErrorLogged;
+
+  mutable std::string currentHash;
+  mutable std::atomic<bool> currentHashCalculated;
 };
 
 #endif  // RAUC_H_

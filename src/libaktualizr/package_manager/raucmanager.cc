@@ -31,6 +31,8 @@ RaucManager::RaucManager(const PackageConfig &pconfig, const BootloaderConfig &b
                              Bootloader *bootloader)
     : PackageManagerInterface(pconfig, BootloaderConfig(), storage, http),
       bootloader_(bootloader == nullptr ? new Bootloader(bconfig, *storage) : bootloader) {
+  this->currentHash = "";
+  this->currentHashCalculated.store(false);
   this->installResultCode = data::ResultCode::Numeric::kUnknown;
   this->installResultDescription = std::string("");
   const char* serviceName = "de.pengutronix.rauc";
@@ -210,8 +212,47 @@ Json::Value RaucManager::getInstalledPackages() const {
 
 std::string RaucManager::getCurrentHash() const {
   LOG_INFO << "called RaucManager::getCurrentHash()";
-  std::string hash = "83d05b9198e383da6d9934aac72678935afae6a046f4adf99d386975cb9d1d69";
-  return hash;
+
+    // Check if the hash has already been calculated
+    if (currentHashCalculated) {
+        return currentHash;
+    }
+
+    // Path to the script and the file that contains the hash
+    const std::string scriptPath = "/home/torizon/calc-root-hash.sh";
+    const std::string hashFilePath = "/run/aktualizr/root-hash";
+
+    // Execute the script to calculate the hash
+    int ret = std::system(scriptPath.c_str());
+    if (ret != 0) {
+        LOG_ERROR << "Failed to execute script: " << scriptPath;
+        return "";  // Return empty string on failure
+    }
+
+    // Read the hash from /run/aktualizr/root-hash
+    std::ifstream hashFile(hashFilePath);
+    if (!hashFile.is_open()) {
+        LOG_ERROR << "Failed to open hash file: " << hashFilePath;
+        return "";  // Return empty string on failure
+    }
+
+    // Read the entire contents of the file into currentHash
+    std::stringstream buffer;
+    buffer << hashFile.rdbuf();
+    currentHash = buffer.str();
+
+    // Close the file
+    hashFile.close();
+
+    // Remove any trailing newlines or spaces from the hash
+    currentHash.erase(currentHash.find_last_not_of(" \n\r\t") + 1);
+
+    // Set the atomic flag to true
+    currentHashCalculated.store(true);
+
+    LOG_INFO << "current hash: " << currentHash;
+
+    return currentHash;
 }
 
 Uptane::Target RaucManager::getCurrent() const {
