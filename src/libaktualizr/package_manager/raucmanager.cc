@@ -219,7 +219,7 @@ std::string RaucManager::getCurrentHash() const {
     }
 
     // Path to the script and the file that contains the hash
-    const std::string scriptPath = "/home/torizon/calc-root-hash.sh";
+    const std::string scriptPath = "/usr/bin/calc-root-hash.sh";
     const std::string hashFilePath = "/run/aktualizr/root-hash";
 
     // Execute the script to calculate the hash
