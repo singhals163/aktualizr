@@ -47,8 +47,7 @@ class RaucManager : public PackageManagerInterface {
   // Signal handlers for installation progress and completion
   void onCompleted(const std::int32_t& status);
   void onProgressChanged(const std::string& interfaceName,
-                         const std::map<std::string, sdbus::Variant>& changedProps,
-                         std::vector<std::string> invalidProperties);
+                         const std::map<std::string, sdbus::Variant>& changedProps);
 
   // Method to send the installation request to RAUC via D-Bus
   void sendRaucInstallRequest(const std::string& bundlePath) const;

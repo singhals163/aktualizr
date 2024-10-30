@@ -32,8 +32,8 @@ RaucManager::RaucManager(const PackageConfig &pconfig, const BootloaderConfig &b
   this->raucProxy_->uponSignal("PropertiesChanged")
       .onInterface("org.freedesktop.DBus.Properties")
       .call([this](const std::string& interfaceName, const std::map<std::string, sdbus::Variant>& changedProperties,
-                   std::vector<std::string> invalidProperties) {
-        this->onProgressChanged(interfaceName, changedProperties, invalidProperties);
+                   std::vector<std::string> invalidProperties __attribute__((unused))) {
+        this->onProgressChanged(interfaceName, changedProperties);
       });
 
   this->raucProxy_->finishRegistration();
@@ -144,8 +144,7 @@ void RaucManager::onCompleted(const std::int32_t& status) {
 
 // Signal handler for "PropertiesChanged" event (progress updates)
 void RaucManager::onProgressChanged(const std::string& interfaceName,
-                                    const std::map<std::string, sdbus::Variant>& changedProperties,
-                                    std::vector<std::string> invalidProperties) {
+                                    const std::map<std::string, sdbus::Variant>& changedProperties) {
   if (interfaceName == "de.pengutronix.rauc.Installer") {
     auto it = changedProperties.find("Progress");
     if (it != changedProperties.end()) {
@@ -369,6 +368,6 @@ TargetStatus RaucManager::verifyTarget(const Uptane::Target& target) const {
 }
 
 bool RaucManager::checkAvailableDiskSpace(uint64_t required_bytes) const {
-  LOG_INFO << "called RaucManager::checkAvailableDiskSpace()";
+  LOG_INFO << "called RaucManager::checkAvailableDiskSpace() required_bytes: " << required_bytes;
   return true;
 }
