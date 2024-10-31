@@ -43,7 +43,6 @@ class RaucManager : public PackageManagerInterface {
   bool checkAvailableDiskSpace(uint64_t required_bytes) const override;
 
  private:
-  // void handleRaucResponse(data::ResultCode::Numeric resultCode);
   // Signal handlers for installation progress and completion
   void onCompleted(const std::int32_t& status);
   void onProgressChanged(const std::string& interfaceName,
