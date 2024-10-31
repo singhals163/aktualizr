@@ -67,6 +67,16 @@ class RaucManager : public PackageManagerInterface {
 
   mutable std::string currentHash;
   mutable std::atomic<bool> currentHashCalculated;
+
+  const std::string raucDestination = "de.pengutronix.rauc";
+  const std::string raucObjectPath = "/" ;
+  const std::string installBundleInterface = "de.pengutronix.rauc.Installer";
+  const std::string installBundleMethod = "InstallBundle";
+  const std::string completedSignal = "Completed";
+  const std::string propertiesChangedProgress = "Progress";
+  const std::string propertiesChangedError = "LastError";
+  const std::string propertiesChangedSignal = "PropertiesChanged";
+  const std::string propertiesChangedInterface = "org.freedesktop.DBus.Properties";
 };
 
 #endif  // RAUC_H_
