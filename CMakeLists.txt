@@ -111,7 +111,6 @@ else(BUILD_OSTREE)
 endif(BUILD_OSTREE)
 
 if(BUILD_RAUC)
-    # find_package(Rauc REQUIRED)
     find_package(sdbus-c++ REQUIRED)
     add_definitions(-DBUILD_RAUC)
 endif(BUILD_RAUC)
@@ -373,7 +372,6 @@ set (AKTUALIZR_EXTERNAL_LIBS
     Threads::Threads
     ${sodium_LIBRARY_RELEASE}
     ${LIBOSTREE_LIBRARIES}
-    # ${sdbus-c++_LIBRARIES}
     SDBusCpp::sdbus-c++
     ${SQLITE3_LIBRARIES}
     ${LibArchive_LIBRARIES}
